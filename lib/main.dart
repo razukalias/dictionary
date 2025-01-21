@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-
+import 'package:flutter/services.dart';
 class Translation {
   final String originalText;
   final String translatedText;
@@ -186,142 +186,157 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
     );
   }
 
-  Widget _buildTranslateTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        children: [
-          Expanded(
-            child: _translatedText != null
-                ? Card(
-                    child: Stack(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12, left: 16, right: 50, bottom: 12),
+Widget _buildTranslateTab() {
+  return Padding(
+    padding: const EdgeInsets.all(16.0),
+    child: Column(
+      children: [
+        Expanded(
+          child: _translatedText != null
+              ? Card(
+                  child: Stack(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(
+                            top: 12, left: 16, right: 50, bottom: 12),
+                        child: GestureDetector(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(
+                                text: _translatedText!.translatedText));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Copied to Clipboard!')),
+                             );
+                          },
                           child: SingleChildScrollView(
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(_translatedText!.translatedText,
-                                  style: const TextStyle(fontSize: 16)),
-                                 const SizedBox(height: 8),
-                                 Text(_translatedText!.originalText,
-                                    style: const TextStyle(fontSize: 14, color: Colors.grey),),
-                              ]
-                            )
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _translatedText!.translatedText,
+                                    style: const TextStyle(fontSize: 16),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _translatedText!.originalText,
+                                    style: const TextStyle(
+                                        fontSize: 14, color: Colors.grey),
+                                  ),
+                                ]),
                           ),
                         ),
-                        Positioned(
-                            top: 4,
-                            right: 4,
-                            child: IconButton(
-                              icon: Icon(
-                                _favorites.contains(_translatedText)
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                              ),
-                              onPressed: () => _toggleFavorite(_translatedText!),
-                            )
-                          )
-                      ],
-                    )
-                  )
-                : Container(),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton(
+                          icon: Icon(
+                            _favorites.contains(_translatedText)
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                          ),
+                          onPressed: () => _toggleFavorite(_translatedText!),
+                        ),
+                      )
+                    ],
+                  ),
+                )
+              : Container(),
+        ),
+        if (_isTranslating)
+          const Center(
+            child: CircularProgressIndicator(),
           ),
-          if (_isTranslating)
-            const Center(
-              child: CircularProgressIndicator(),
-            ),
-            SizedBox(height: 16.0),
-           Wrap(
-              spacing: 8.0, // Spacing between tags
-              children: ['English', 'Arabic', 'Swedish'].map((language) {
-              return FilterChip(
-                label: Text(language),
-                selected: _selectedDestinationLanguage == language,
-                onSelected: (bool selected) {
-                  setState(() {
+        SizedBox(height: 16.0),
+        Wrap(
+          spacing: 8.0, // Spacing between tags
+          children: ['English', 'Arabic', 'Swedish'].map((language) {
+            return FilterChip(
+              label: Text(language),
+              selected: _selectedDestinationLanguage == language,
+              onSelected: (bool selected) {
+                setState(() {
                   _selectedDestinationLanguage = language;
-                  });
-                },
-              );
+                });
+              },
+            );
+          }).toList(),
+        ),
+        SizedBox(height: 16.0),
+        Row(
+          children: [
+            DropdownButton<String>(
+              value: _selectedLanguage,
+              items: <String>['English', 'Arabic', 'Swedish']
+                  .map((String value) {
+                return DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(value),
+                );
               }).toList(),
+              onChanged: (String? newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _selectedLanguage = newValue;
+                  });
+                }
+              },
             ),
-          SizedBox(height: 16.0),
-          Row(
-            children: [
-              DropdownButton<String>(
-                value: _selectedLanguage,
-                items: <String>['English', 'Arabic', 'Swedish']
-                    .map((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  if (newValue != null) {
-                    setState(() {
-                      _selectedLanguage = newValue;
-                    });
-                  }
+            SizedBox(width: 16.0),
+            Expanded(
+              child: TextField(
+                controller: _textController,
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(),
+                  labelText: 'Enter text to translate',
+                ),
+                onSubmitted: (value) {
+                  _translateText();
                 },
               ),
-              SizedBox(width: 16.0),
-              Expanded(
-                child: TextField(
-                  controller: _textController,
-                  decoration: InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Enter text to translate',
-                  ),
-                  onSubmitted: (value) {
-                    _translateText();
-                  },
-                ),
-              )
-            ],
-          ),
-           SizedBox(height: 16.0),
-        ],
-      ),
-    );
-  }
+            )
+          ],
+        ),
+        SizedBox(height: 16.0),
+      ],
+    ),
+  );
+}
 
-   Widget _buildFavoritesTab() {
+    Widget _buildFavoritesTab() {
     return ListView.builder(
       itemCount: _favorites.length,
       itemBuilder: (context, index) {
         final favorite = _favorites[index];
         return Card(
-          child: Stack(
+          child: ExpansionTile(
+            title: Text(favorite.originalText),
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 12, left: 16, right: 50, bottom: 12),
-                child:  SingleChildScrollView(
-                   child: Column(
-                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(favorite.translatedText,
-                         style: const TextStyle(fontSize: 16)),
-                      const SizedBox(height: 8),
-                      Text(favorite.originalText,
-                        style: const TextStyle(fontSize: 14, color: Colors.grey),),
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 4,
-                right: 4,
-                child: IconButton(
-                  icon: Icon(Icons.delete),
-                  onPressed: () {
-                    setState(() {
-                      _favorites.removeAt(index);
-                      _saveData();
-                    });
-                  },
+                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                child: Stack(
+                  children: [
+                    Padding(
+                       padding: const EdgeInsets.only(right: 48),
+                      child: SingleChildScrollView(
+                        child: Text(favorite.translatedText,
+                          style: const TextStyle(fontSize: 16)
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: IconButton(
+                        icon: Icon(Icons.delete),
+                        onPressed: () {
+                          setState(() {
+                            _favorites.removeAt(index);
+                            _saveData();
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -332,22 +347,42 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
   }
 
   Widget _buildHistoryTab() {
-    return ListView.builder(
-      itemCount: _history.length,
-      itemBuilder: (context, index) {
-        final historyItem = _history[index];
-        return Card(
-          child: ListTile(
-            title: Text(historyItem.translatedText),
-            subtitle: Text(historyItem.originalText),
-            trailing: IconButton(
-              icon: Icon(
-                _favorites.contains(historyItem)
-                    ? Icons.favorite
-                    : Icons.favorite_border,
-              ),
-              onPressed: () => _toggleFavorite(historyItem),
-            ),
+     return ListView.builder(
+        itemCount: _history.length,
+        itemBuilder: (context, index) {
+          final historyItem = _history[index];
+            return Card(
+              child:  ExpansionTile(
+              title: Text(historyItem.originalText),
+               children: [
+                 Padding(
+                   padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                   child: Stack(
+                     children: [
+                       Padding(
+                           padding: const EdgeInsets.only(right: 48),
+                           child: SingleChildScrollView(
+                            child: Text(historyItem.translatedText,
+                                style: const TextStyle(fontSize: 16)
+                            ),
+                          ),
+                         ),
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                         child: IconButton(
+                            icon: Icon(
+                             _favorites.contains(historyItem)
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                           ),
+                          onPressed: () => _toggleFavorite(historyItem),
+                        ),
+                      ),
+                     ],
+                   ),
+                 ),
+               ],
           ),
         );
       },
