@@ -309,37 +309,30 @@ Widget _buildTranslateTab() {
         final favorite = _favorites[index];
         return Card(
           child: ExpansionTile(
-            title: Text(favorite.originalText),
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-                child: Stack(
-                  children: [
-                    Padding(
-                       padding: const EdgeInsets.only(right: 48),
-                      child: SingleChildScrollView(
-                        child: Text(favorite.translatedText,
-                          style: const TextStyle(fontSize: 16)
-                        ),
-                      ),
-                    ),
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: IconButton(
-                        icon: Icon(Icons.delete),
-                        onPressed: () {
-                          setState(() {
-                            _favorites.removeAt(index);
-                            _saveData();
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(favorite.originalText),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () {
+                      setState(() {
+                        _favorites.removeAt(index);
+                        _saveData();
+                      });
+                    },
+                  ),
+                ],
               ),
-            ],
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                  child: SingleChildScrollView(
+                      child: Text(favorite.translatedText,
+                          style: const TextStyle(fontSize: 16))),
+                ),
+              ]
           ),
         );
       },
@@ -347,45 +340,40 @@ Widget _buildTranslateTab() {
   }
 
   Widget _buildHistoryTab() {
-     return ListView.builder(
-        itemCount: _history.length,
-        itemBuilder: (context, index) {
-          final historyItem = _history[index];
-            return Card(
-              child:  ExpansionTile(
-              title: Text(historyItem.originalText),
-               children: [
-                 Padding(
-                   padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-                   child: Stack(
-                     children: [
-                       Padding(
-                           padding: const EdgeInsets.only(right: 48),
-                           child: SingleChildScrollView(
-                            child: Text(historyItem.translatedText,
-                                style: const TextStyle(fontSize: 16)
-                            ),
-                          ),
-                         ),
-                      Positioned(
-                        top: 0,
-                        right: 0,
-                         child: IconButton(
-                            icon: Icon(
-                             _favorites.contains(historyItem)
-                                ? Icons.favorite
-                                : Icons.favorite_border,
-                           ),
-                          onPressed: () => _toggleFavorite(historyItem),
-                        ),
-                      ),
-                     ],
-                   ),
-                 ),
-               ],
+    return ListView.builder(
+      itemCount: _history.length,
+      itemBuilder: (context, index) {
+        final historyItem = _history[index];
+        return Card(
+           child: ExpansionTile(
+            title: Row(
+              children: [
+                Expanded(
+                    child: Text(historyItem.originalText)
+                ),
+                  IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () {
+                      setState(() {
+                        _history.removeAt(index);
+                        _saveData();
+                      });
+                    },
+                  ),
+              ],
+            ),
+           children: [
+             Padding(
+                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                child: SingleChildScrollView(
+                  child: Text(historyItem.translatedText,
+                    style: const TextStyle(fontSize: 16)),
+                ),
+              )
+           ],
           ),
         );
       },
     );
   }
-}
+    }
