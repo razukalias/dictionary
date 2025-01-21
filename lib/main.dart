@@ -302,7 +302,7 @@ Widget _buildTranslateTab() {
   );
 }
 
-    Widget _buildFavoritesTab() {
+   Widget _buildFavoritesTab() {
     return ListView.builder(
       itemCount: _favorites.length,
       itemBuilder: (context, index) {

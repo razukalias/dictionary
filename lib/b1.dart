@@ -1,771 +1,382 @@
-// lib/main.dart
-//import 'dart:js_interop';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter/services.dart';
+class Translation {
+  final String originalText;
+  final String translatedText;
+
+  Translation({required this.originalText, required this.translatedText});
+
+  Map<String, dynamic> toJson() => {
+        'originalText': originalText,
+        'translatedText': translatedText,
+      };
+
+  factory Translation.fromJson(Map<String, dynamic> json) {
+    return Translation(
+        originalText: json['originalText'],
+        translatedText: json['translatedText']);
+  }
+}
+
 void main() {
-  runApp(const TranslatorApp());
+  runApp(TranslatorApp());
 }
 
 class TranslatorApp extends StatelessWidget {
-  const TranslatorApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Translator App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        useMaterial3: true,
-      ),
-      home: const TranslatorHome(),
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: TranslatorHomePage(),
     );
   }
 }
 
-// Models
-class TranslationResult {
-  final String word;
-  final Map<String, String> definitions;
-  final Map<String, List<String>> synonyms;
-  final Map<String, List<String>> antonyms;
-  final Map<String, Map<String, String>> conjugation;
-  final List<Example> examples;
-
-  TranslationResult({
-    required this.word,
-    required this.definitions,
-    required this.synonyms,
-    required this.antonyms,
-    required this.conjugation,
-    required this.examples,
-  });
-
-  factory TranslationResult.fromJson(Map<String, dynamic> json) {
-    return TranslationResult(
-      word: json['word'] ?? '',
-      definitions: Map<String, String>.from(json['definitions'] ?? {}),
-      synonyms: Map<String, List<String>>.from(
-        (json['synonyms'] ?? {}).map(
-          (k, v) => MapEntry(k, List<String>.from(v ?? [])),
-        ),
-      ),
-      antonyms: Map<String, List<String>>.from(
-        (json['antonyms'] ?? {}).map(
-          (k, v) => MapEntry(k, List<String>.from(v ?? [])),
-        ),
-      ),
-      conjugation: Map<String, Map<String, String>>.from(
-        (json['conjugation'] ?? {}).map(
-          (k, v) => MapEntry(
-            k,
-            Map<String, String>.from(v ?? {}),
-          ),
-        ),
-      ),
-      examples: (json['examples'] as List? ?? [])
-          .map((e) => Example.fromJson(e))
-          .toList(),
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'word': word,
-        'definitions': definitions,
-        'synonyms': synonyms,
-        'antonyms': antonyms,
-        'conjugation': conjugation,
-        'examples': examples.map((e) => e.toJson()).toList(),
-      };
-}
-
-class Example {
-  final String scenario;
-  final String english;
-  final String swedish;
-  final String arabic;
-
-  Example({
-    required this.scenario,
-    required this.english,
-    required this.swedish,
-    required this.arabic,
-  });
-
-  factory Example.fromJson(Map<String, dynamic> json) {
-    return Example(
-      scenario: json['scenario'] ?? '',
-      english: json['english'] ?? '',
-      swedish: json['swedish'] ?? '',
-      arabic: json['arabic'] ?? '',
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
-        'scenario': scenario,
-        'english': english,
-        'swedish': swedish,
-        'arabic': arabic,
-      };
-}
-
-// Services
-class TranslationService {
-  final GenerativeModel model;
-  //final SharedPreferences prefs;
-  
-  TranslationService({required String apiKey}) 
-      : model = GenerativeModel(
-          model: 'gemini-2.0-flash-exp',
-          apiKey: apiKey,
-          generationConfig: GenerationConfig(responseMimeType: "application/json")
-        );
-
-  Future<TranslationResult> translate(String text, String fromLang) async {
-    try {
-      // Check offline cache first
-      final cachedResult = await _checkCache(text, fromLang);
-      if (cachedResult != null) {
-        return cachedResult;
-      }
-
-      final prompt = '''
-        Translate the word "$text" from $fromLang and provide detailed information in all three languages (English, Swedish, Arabic) in this JSON format:
-        {
-          "word": "$text",
-          "definitions": {
-            "english": "",
-            "swedish": "",
-            "arabic": ""
-          },
-          "synonyms": {
-            "english": [],
-            "swedish": [],
-            "arabic": []
-          },
-          "antonyms": {
-            "english": [],
-            "swedish": [],
-            "arabic": []
-          },
-          "conjugation": {...},
-          "examples": [10 examples with different scenarios]
-        }
-      ''';
-
-      final content = Content.text(prompt);
-      final response = await model.generateContent([content]);
-      
-      if (response.text == null) {
-        throw Exception('Empty response from API');
-      }
-
-      Map<String, dynamic> jsonResponse;
-      try {
-        jsonResponse = json.decode(response.text!);
-      } catch (e) {
-        throw Exception('Invalid JSON response: $e');
-      }
-
-      // Validate JSON structure
-      _validateJsonResponse(jsonResponse);
-
-      final result = TranslationResult.fromJson(jsonResponse);
-      
-      // Cache the result
-      await _cacheTranslation(text, fromLang, result);
-      
-      // Save to history
-      await _saveToHistory(result);
-
-      return result;
-    } catch (e) {
-      throw Exception('Translation failed: $e');
-    }
-  }
-
-  void _validateJsonResponse(Map<String, dynamic> json) {
-    final requiredFields = [
-      'word',
-      'definitions',
-      'synonyms',
-      'antonyms',
-      'conjugation',
-      'examples'
-    ];
-
-    for (final field in requiredFields) {
-      if (!json.containsKey(field)) {
-        throw Exception('Missing required field: $field');
-      }
-    }
-
-    // Validate definitions
-    final definitions = json['definitions'];
-    if (definitions is! Map) {
-      throw Exception('Invalid definitions format');
-    }
-
-    // Add more specific validations as needed
-  }
-
-  Future<TranslationResult?> _checkCache(String text, String fromLang) async {
-    final prefs = await SharedPreferences.getInstance();
-    final cacheJson = prefs.getString('${text}_${fromLang}_cache');
-    
-    if (cacheJson != null) {
-      final cache = TranslationCache.fromJson(json.decode(cacheJson));
-      
-      // Check if cache is still valid (e.g., less than 24 hours old)
-      if (DateTime.now().difference(cache.timestamp).inHours < 24) {
-        return cache.result;
-      }
-    }
-    return null;
-  }
-
-  Future<void> _cacheTranslation(
-    String text,
-    String fromLang,
-    TranslationResult result,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    final cache = TranslationCache(
-      word: text,
-      fromLang: fromLang,
-      result: result,
-      timestamp: DateTime.now(),
-    );
-    
-    await prefs.setString(
-      '${text}_${fromLang}_cache',
-      json.encode(cache.toJson()),
-    );
-  }
-
-  Future<void> _saveToHistory(TranslationResult result) async {
-    final prefs = await SharedPreferences.getInstance();
-    final history = prefs.getStringList('history') ?? [];
-    
-    // Add to beginning of history, limit to 100 items
-    history.insert(0, json.encode(result.toJson()));
-    if (history.length > 100) {
-      history.removeLast();
-    }
-    
-    await prefs.setStringList('history', history);
-  }
-}
-
-
-
-
-// Screens
-class TranslatorHome extends StatefulWidget {
-  const TranslatorHome({super.key});
-
+class TranslatorHomePage extends StatefulWidget {
   @override
-  State<TranslatorHome> createState() => _TranslatorHomeState();
+  _TranslatorHomePageState createState() => _TranslatorHomePageState();
 }
- 
-  //TranslationService? _service;//test
 
-// Modified TranslatorHome
-class _TranslatorHomeState extends State<TranslatorHome> {
-  final TextEditingController _textController = TextEditingController();
-  TranslationResult? _result;
- TranslationService? _service=TranslationService(apiKey: 'AIzaSyBzXii5o0s_xAUHz8CfLqAgQACaNCYVsjg');//test
-  String _fromLang = 'English';
-  List<TranslationResult> _favorites = [];
-  List<TranslationResult> _history = [];
-  bool _isLoading = false;
+class _TranslatorHomePageState extends State<TranslatorHomePage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  Map<String, String>? _translatedTexts; // Map to store multiple translations
+  TextEditingController _textController = TextEditingController();
+  List<Translation> _history = [];
+  List<Translation> _favorites = [];
+  bool _isTranslating = false;
+  final String apiKey =
+      'AIzaSyBzXii5o0s_xAUHz8CfLqAgQACaNCYVsjg'; // Replace with your actual Gemini API key
+  late GenerativeModel _model;
+  String _selectedLanguage = 'English';
+  List<String> _selectedDestinationLanguages = ['English']; // Multiple selections
 
-    Future<void> _saveFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
-    final favoritesJson = _favorites
-        .map((result) => jsonEncode(result.toJson()))
-        .toList();
-    await prefs.setStringList('favorites', favoritesJson);
-  }
-  void _toggleFavorite(TranslationResult result) {
-    setState(() {
-      if (_favorites.any((f) => f.word == result.word)) {
-        _favorites.removeWhere((f) => f.word == result.word);
-      } else {
-        _favorites.add(result);
-      }
-    });
-    _saveFavorites();
-  }
-  
-    Future<void> _loadFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
-    final favoritesJson = prefs.getStringList('favorites') ?? [];
-    setState(() {
-      _favorites = favoritesJson
-          .map((json) => TranslationResult.fromJson(jsonDecode(json)))
-          .toList();
-    });
-  }
   @override
   void initState() {
     super.initState();
-    _initializeService();
-    _loadFavorites();
-    _loadHistory();
+    _tabController = TabController(length: 3, vsync: this);
+    _loadData();
+    _model = GenerativeModel(model: 'gemini-2.0-flash-exp', apiKey: apiKey);
   }
 
-  Future<void> _initializeService() async {
-    final apiKey = await SharedPrefsService.getApiKey();
-    print("API Key retrieved-----------------------------------------------------------: ${apiKey != null}"); // Debug print
-    if (apiKey != null) {
-      setState(() {
-        _service = TranslationService(apiKey: apiKey);
-      });
-        print("Service initialized+++++++++++++++++++++++++++++++++++++++++++++++++++++: ${_service != null}"); 
-    }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _textController.dispose();
+    super.dispose();
   }
 
-  Future<void> _loadHistory() async {
+  // Method to save data to local storage
+  Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
-    final historyJson = prefs.getStringList('history') ?? [];
-    setState(() {
+    final historyJson = _history.map((e) => jsonEncode(e.toJson())).toList();
+    final favoriteJson = _favorites.map((e) => jsonEncode(e.toJson())).toList();
+    await prefs.setStringList('history', historyJson);
+    await prefs.setStringList('favorites', favoriteJson);
+  }
+
+  // Method to retrieve data from local storage
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final historyJson = prefs.getStringList('history');
+    final favoritesJson = prefs.getStringList('favorites');
+
+    if (historyJson != null) {
       _history = historyJson
-          .map((json) => TranslationResult.fromJson(jsonDecode(json)))
+          .map((e) => Translation.fromJson(jsonDecode(e)))
           .toList();
-    });
+    }
+    if (favoritesJson != null) {
+      _favorites = favoritesJson
+          .map((e) => Translation.fromJson(jsonDecode(e)))
+          .toList();
+    }
+    setState(() {});
   }
 
-  Widget _buildHistoryTab() {
-    return ListView.builder(
-      itemCount: _history.length,
-      itemBuilder: (context, index) {
-        final result = _history[index];
-        return ListTile(
-          title: Text(result.word),
-          subtitle: Text(result.definitions['english'] ?? ''),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: Icon(
-                  _favorites.any((f) => f.word == result.word)
-                      ? Icons.favorite
-                      : Icons.favorite_border,
-                ),
-                color: Colors.red,
-                onPressed: () => _toggleFavorite(result),
-              ),
-              IconButton(
-                icon: Icon(Icons.copy),
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(
-                    text: result.definitions['english'] ?? '',
-                  ));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Copied to clipboard')),
-                  );
-                },
-              ),
-            ],
-          ),
-          onTap: () => _showTranslationDialog(result),
-        );
-      },
-    );
-  }
-    Widget _buildTranslationResult(TranslationResult result) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                result.word,
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              IconButton(
-                icon: Icon(
-                  _favorites.any((f) => f.word == result.word)
-                      ? Icons.favorite
-                      : Icons.favorite_border,
-                ),
-                color: Colors.red,
-                onPressed: () => _toggleFavorite(result),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Definitions',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          ...result.definitions.entries.map(
-            (e) => ListTile(
-              title: Text(e.key.capitalize()),
-              subtitle: Text(e.value),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Conjugation',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          ...result.conjugation.entries.map(
-            (lang) => ExpansionTile(
-              title: Text(lang.key.capitalize()),
-              children: lang.value.entries.map(
-                (conj) => ListTile(
-                  title: Text(conj.key.replaceAll('_', ' ').capitalize()),
-                  subtitle: Text(conj.value),
-                ),
-              ).toList(),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Examples',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          ...result.examples.map(
-            (example) => ExpansionTile(
-              title: Text(example.scenario),
-              children: [
-                ListTile(
-                  title: const Text('English'),
-                  subtitle: Text(example.english),
-                ),
-                ListTile(
-                  title: const Text('Swedish'),
-                  subtitle: Text(example.swedish),
-                ),
-                ListTile(
-                  title: const Text('Arabic'),
-                  subtitle: Text(example.arabic),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+Future<void> _translateText() async {
+    if (_textController.text.isEmpty) return;
 
-  void _showTranslationDialog(TranslationResult result) {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _buildTranslationResult(result),
-              SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('Close'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-  Widget _buildFavoritesTab() {
-    return ListView.builder(
-      itemCount: _favorites.length,
-      itemBuilder: (context, index) {
-        final result = _favorites[index];
-        return ListTile(
-          title: Text(result.word),
-          subtitle: Text(result.definitions[''] ?? ''),
-          trailing: IconButton(
-            icon: const Icon(Icons.favorite),
-            color: Colors.red,
-            onPressed: () => _toggleFavorite(result),
-          ),
-          onTap: () {
-            showDialog(
-              context: context,
-              builder: (context) => Dialog(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: _buildTranslationResult(result),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-  @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text('Translator'),
-          actions: [
-            IconButton(
-              icon: Icon(Icons.settings),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => SettingsScreen()),
-                );
-              },
-            ),
-          ],
-          bottom: TabBar(
-            tabs: [
-              Tab(text: 'Translate'),
-              Tab(text: 'History'),
-              Tab(text: 'Favorites'),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _buildTranslateTab(),
-            _buildHistoryTab(),
-            _buildFavoritesTab(),
-          ],
-        ),
-      ),
-    );
-  }
-
-Widget _buildTranslateTab() {
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        children: [
-          DropdownButton<String>(
-            value: _fromLang,
-            items: ['English', 'Swedish', 'Arabic']
-                .map((lang) => DropdownMenuItem(
-                      value: lang,
-                      child: Text(lang),
-                    ))
-                .toList(),
-            onChanged: (value) {
-              setState(() => _fromLang = value!);
-            },
-          ),
-          TextField(
-            controller: _textController,
-            decoration: InputDecoration(
-              hintText: 'Enter text to translate',
-            ),
-          ),
-          SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: _service == null || _isLoading ? null:
-                 
-            () async {
-                    if (_textController.text.isEmpty) return;
-                    setState(() => _isLoading = true);
-                    try {
-                      final result = await _service!.translate(
-                        _textController.text,
-                        _fromLang,
-                      );
-                      //print("-------------------------"+result.toJson().jsify().toString());
-                      setState(() {
-                        _result = result;
-                        _isLoading = false;
-                      });
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Translation failed: $e')),
-                      );
-                      setState(() => _isLoading = false);
-                    }
-                  },
-            child: _isLoading
-                ? CircularProgressIndicator()
-                : Text(_service == null ? 'Set API Key' : 'Translate'),
-          ),
-          if (_result != null) ...[
-            SizedBox(height: 16),
-            Expanded(
-              child: _buildTranslationResult(_result!),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-extension StringExtension on String {
-  String capitalize() {
-    return "${this[0].toUpperCase()}${substring(1)}";
-  }
-}class SharedPrefsService {
-  static const String _apiKeyKey = 'api_key';
-  static const String _historyKey = 'history';
-  static const String _offlineCacheKey = 'offline_cache';
-
-
-
-  static Future<String?> getCachedTranslation(String cacheKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('${_offlineCacheKey}_$cacheKey');
-  }
-
-  static Future<void> cacheTranslation(String cacheKey, String data) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('${_offlineCacheKey}_$cacheKey', data);
-  }
-
-  
-    static Future<List<String>> getHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getStringList(_historyKey) ?? [];
-  }
-  
-
-  static Future<void> saveHistory(List<String> history) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_historyKey, history);
-  }
-  static Future<String?> getApiKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_apiKeyKey);
-  }
-  
-  static Future<void> saveApiKey(String apiKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_apiKeyKey, apiKey);
-    //_service = TranslationService(apiKey: apiKey);
-  }
-  
-  static Future<void> deleteApiKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_apiKeyKey);
-  }
-}
-class TranslationCache {
-  final String word;
-  final String fromLang;
-  final TranslationResult result;
-  final DateTime timestamp;
-
-  TranslationCache({
-    required this.word,
-    required this.fromLang,
-    required this.result,
-    required this.timestamp,
-  });
-
-  Map<String, dynamic> toJson() => {
-    'word': word,
-    'fromLang': fromLang,
-    'result': result.toJson(),
-    'timestamp': timestamp.toIso8601String(),
-  };
-
-  factory TranslationCache.fromJson(Map<String, dynamic> json) {
-    return TranslationCache(
-      word: json['word'],
-      fromLang: json['fromLang'],
-      result: TranslationResult.fromJson(json['result']),
-      timestamp: DateTime.parse(json['timestamp']),
-    );
-  }
-}
-// lib/screens/settings_screen.dart
-class SettingsScreen extends StatefulWidget {
-  @override
-  _SettingsScreenState createState() => _SettingsScreenState();
-}
-
-class _SettingsScreenState extends State<SettingsScreen> {
-  final _apiKeyController = TextEditingController();
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadApiKey();
-  }
-
-  Future<void> _loadApiKey() async {
-    final apiKey = await SharedPrefsService.getApiKey();
     setState(() {
-      _apiKeyController.text = apiKey ?? '';
-      _isLoading = false;
+      _isTranslating = true;
+      _translatedTexts = null; // Reset to null while translating
+    });
+
+    try {
+      // Create a single prompt with all languages
+      String prompt =
+          'define, Translate, grammer, examples of all scenarios the following text from $_selectedLanguage to  all languages between the 2 braces(${_selectedDestinationLanguages.join(', ')}): ${_textController.text}';
+      final content = Content.text(prompt);
+
+      final generateResponse = await _model.generateContent([content]);
+      print(prompt);
+      print(generateResponse.text);
+      Map<String, String> translatedTexts = {};
+      if (generateResponse.text != null) {
+          // Parse the translation
+           List<String> translations =  _parseTranslations(generateResponse.text!);
+           if (translations.length == _selectedDestinationLanguages.length) {
+              for (int i = 0; i < _selectedDestinationLanguages.length; i++) {
+                 translatedTexts[_selectedDestinationLanguages[i]] = translations[i];
+              }
+          } else {
+           throw Exception("Translation failed: The API does not return the correct number of responses");
+          }
+      } else {
+          throw Exception("Translation failed");
+      }
+      setState(() {
+         _isTranslating = false;
+         _translatedTexts = {...translatedTexts}; // Use spread operator
+         if (_translatedTexts != null) {
+           final translation = Translation(
+              originalText: _textController.text,
+              translatedText: _translatedTexts.toString());
+           _history.insert(0, translation);
+           _saveData();
+         }
+         _textController.clear();
+      });
+    } catch (e) {
+      setState(() {
+        _isTranslating = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error translating text: $e')),
+        );
+      });
+    }
+  }
+
+// Helper method to parse translation
+  List<String> _parseTranslations(String response) {
+    // Split the response into parts based on language
+    List<String> translations = [];
+    // Implement your parsing logic here to extract individual translations
+    // Example:
+    var parts = response.split(RegExp(r'\[(English|Arabic|Swedish)\]:'));
+      for(int i = 1; i< parts.length; i++){
+           translations.add(parts[i].trim());
+      }
+    return translations;
+  }
+
+  void _toggleFavorite(Translation translation) {
+    setState(() {
+      if (_favorites.contains(translation)) {
+        _favorites.remove(translation);
+      } else {
+        _favorites.add(translation);
+      }
+      _saveData();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Settings')),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _apiKeyController,
-                    decoration: InputDecoration(
-                      labelText: 'Gemini API Key',
-                      suffixIcon: IconButton(
-                        icon: Icon(Icons.save),
-                        onPressed: () async {
-                          await SharedPrefsService.saveApiKey(
-                            _apiKeyController.text,
-                          );
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('API Key saved')),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () async {
-                      await SharedPrefsService.deleteApiKey();
-                      setState(() => _apiKeyController.clear());
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('API Key deleted')),
-                      );
-                    },
-                    child: Text('Delete API Key'),
-                  ),
-                  SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () async {
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.clear();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('All data cleared')),
-                      );
-                    },
-                    child: Text('Clear All Data'),
-                  ),
-                ],
-              ),
+      appBar: AppBar(
+        title: Text('Translator App'),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildTranslateTab(),
+                _buildFavoritesTab(),
+                _buildHistoryTab(),
+              ],
             ),
+          ),
+          Container(
+            color: Colors.grey[200],
+            child: TabBar(
+              controller: _tabController,
+              tabs: [
+                Tab(icon: Icon(Icons.translate), text: "Translate"),
+                Tab(icon: Icon(Icons.favorite), text: "Favorites"),
+                Tab(icon: Icon(Icons.history), text: "History"),
+              ],
+            ),
+          )
+        ],
+      ),
     );
   }
 
-  @override
-  void dispose() {
-    _apiKeyController.dispose();
-    super.dispose();
+ Widget _buildTranslateTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+           Expanded(
+                child: _translatedTexts != null ?
+                   ListView.builder(
+                      itemCount: _translatedTexts!.length,
+                       itemBuilder: (context, index) {
+                          final language = _translatedTexts!.keys.elementAt(index);
+                          final translation =  _translatedTexts![language]!;
+                           return Card(
+                             child: Padding(
+                               padding: const EdgeInsets.only(
+                                   top: 12, left: 16, right: 16, bottom: 12),
+                             child: Column(
+                               crossAxisAlignment: CrossAxisAlignment.start,
+                               children: [
+                                 Text(language, style: const TextStyle(fontWeight: FontWeight.bold),),
+                                 const SizedBox(height: 8),
+                                 Text(translation,
+                                     style: const TextStyle(fontSize: 16)),
+                               ]
+                             ),
+                            ),
+                            );
+                       }
+                    )
+              : Container()
+
+          ),
+          if (_isTranslating)
+            const Center(
+              child: CircularProgressIndicator(),
+            ),
+          SizedBox(height: 16.0),
+          Wrap(
+            spacing: 8.0, // Spacing between tags
+            children: ['English', 'Arabic', 'Swedish'].map((language) {
+              return FilterChip(
+                label: Text(language),
+                selected: _selectedDestinationLanguages.contains(language),
+                onSelected: (bool selected) {
+                  setState(() {
+                    if (selected) {
+                      _selectedDestinationLanguages.add(language);
+                    } else {
+                      _selectedDestinationLanguages.remove(language);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+          SizedBox(height: 16.0),
+          Row(
+            children: [
+              DropdownButton<String>(
+                value: _selectedLanguage,
+                items: <String>['English', 'Arabic', 'Swedish']
+                    .map((String value) {
+                  return DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(value),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() {
+                      _selectedLanguage = newValue;
+                    });
+                  }
+                },
+              ),
+              SizedBox(width: 16.0),
+              Expanded(
+                child: TextField(
+                  controller: _textController,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'Enter text to translate',
+                  ),
+                  onSubmitted: (value) {
+                    _translateText();
+                  },
+                ),
+              )
+            ],
+          ),
+          SizedBox(height: 16.0),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFavoritesTab() {
+    return ListView.builder(
+      itemCount: _favorites.length,
+      itemBuilder: (context, index) {
+        final favorite = _favorites[index];
+        return Card(
+          child: ExpansionTile(
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(favorite.originalText),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () {
+                      setState(() {
+                        _favorites.removeAt(index);
+                        _saveData();
+                      });
+                    },
+                  ),
+                ],
+              ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                  child: SingleChildScrollView(
+                      child: Text(favorite.translatedText,
+                          style: const TextStyle(fontSize: 16))),
+                ),
+              ]
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHistoryTab() {
+    return ListView.builder(
+      itemCount: _history.length,
+      itemBuilder: (context, index) {
+        final historyItem = _history[index];
+        return Card(
+          child: ExpansionTile(
+            title: Row(
+              children: [
+                Expanded(child: Text(historyItem.originalText)),
+                IconButton(
+                  icon: Icon(Icons.delete),
+                  onPressed: () {
+                    setState(() {
+                      _history.removeAt(index);
+                      _saveData();
+                    });
+                  },
+                ),
+              ],
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                child: SingleChildScrollView(
+                  child: Text(historyItem.translatedText,
+                      style: const TextStyle(fontSize: 16)),
+                ),
+              )
+            ],
+          ),
+        );
+      },
+    );
   }
 }
