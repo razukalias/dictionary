@@ -53,8 +53,10 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
   bool _isTranslating = false;
   final String apiKey =
       'AIzaSyBzXii5o0s_xAUHz8CfLqAgQACaNCYVsjg'; // Replace with your actual Gemini API key
-  late GenerativeModel _model;
-  String _selectedLanguage = 'English'; // Default selected language
+    late GenerativeModel _model;
+  String _selectedLanguage = 'English';
+    String _selectedDestinationLanguage = 'English';
+
 
   @override
   void initState() {
@@ -105,13 +107,13 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
       _isTranslating = true;
     });
 
-    try {
+     try {
       final prompt =
-          'Define, Translate, grammer, examples of all scenarios can be used the following text from $_selectedLanguage to english, arabic, swedish: ${_textController.text}';
+          'Define, Translate, grammer, examples of all scenarios can be used the following text from $_selectedLanguage to $_selectedDestinationLanguage: ${_textController.text}';
       final content = Content.text(prompt);
 
       final generateResponse = await _model.generateContent([content]);
-
+    
       String translatedText = "";
       if (generateResponse.text != null) {
         translatedText = generateResponse.text!;
@@ -137,6 +139,7 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
       });
     }
   }
+
 
   void _toggleFavorite(Translation translation) {
     setState(() {
@@ -168,15 +171,15 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
             ),
           ),
           Container(
-            color: Colors.grey[200],
-            child: TabBar(
-              controller: _tabController,
-              tabs: [
-                Tab(icon: Icon(Icons.translate), text: "Translate"),
-                Tab(icon: Icon(Icons.favorite), text: "Favorites"),
-                Tab(icon: Icon(Icons.history), text: "History"),
-              ],
-            ),
+           color: Colors.grey[200],
+            child:  TabBar(
+                controller: _tabController,
+                tabs: [
+                  Tab(icon: Icon(Icons.translate), text: "Translate"),
+                  Tab(icon: Icon(Icons.favorite), text: "Favorites"),
+                  Tab(icon: Icon(Icons.history), text: "History"),
+                ],
+              ),
           )
         ],
       ),
@@ -192,42 +195,57 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
             child: _translatedText != null
                 ? Card(
                     child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(
-                            top: 12, left: 16, right: 50, bottom: 12),
-                        child: SingleChildScrollView(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12, left: 16, right: 50, bottom: 12),
+                          child: SingleChildScrollView(
                             child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Text(_translatedText!.translatedText,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(_translatedText!.translatedText,
                                   style: const TextStyle(fontSize: 16)),
-                              const SizedBox(height: 8),
-                              Text(
-                                _translatedText!.originalText,
-                                style: const TextStyle(
-                                    fontSize: 14, color: Colors.grey),
+                                 const SizedBox(height: 8),
+                                 Text(_translatedText!.originalText,
+                                    style: const TextStyle(fontSize: 14, color: Colors.grey),),
+                              ]
+                            )
+                          ),
+                        ),
+                        Positioned(
+                            top: 4,
+                            right: 4,
+                            child: IconButton(
+                              icon: Icon(
+                                _favorites.contains(_translatedText)
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
                               ),
-                            ])),
-                      ),
-                      Positioned(
-                          top: 4,
-                          right: 4,
-                          child: IconButton(
-                            icon: Icon(
-                              _favorites.contains(_translatedText)
-                                  ? Icons.favorite
-                                  : Icons.favorite_border,
-                            ),
-                            onPressed: () => _toggleFavorite(_translatedText!),
-                          ))
-                    ],
-                  ))
+                              onPressed: () => _toggleFavorite(_translatedText!),
+                            )
+                          )
+                      ],
+                    )
+                  )
                 : Container(),
           ),
           if (_isTranslating)
             const Center(
               child: CircularProgressIndicator(),
+            ),
+            SizedBox(height: 16.0),
+           Wrap(
+              spacing: 8.0, // Spacing between tags
+              children: ['English', 'Arabic', 'Swedish'].map((language) {
+              return FilterChip(
+                label: Text(language),
+                selected: _selectedDestinationLanguage == language,
+                onSelected: (bool selected) {
+                  setState(() {
+                  _selectedDestinationLanguage = language;
+                  });
+                },
+              );
+              }).toList(),
             ),
           SizedBox(height: 16.0),
           Row(
@@ -264,13 +282,13 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
               )
             ],
           ),
-          SizedBox(height: 16.0),
+           SizedBox(height: 16.0),
         ],
       ),
     );
   }
 
-  Widget _buildFavoritesTab() {
+   Widget _buildFavoritesTab() {
     return ListView.builder(
       itemCount: _favorites.length,
       itemBuilder: (context, index) {
@@ -279,20 +297,16 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
           child: Stack(
             children: [
               Padding(
-                padding: const EdgeInsets.only(
-                    top: 12, left: 16, right: 50, bottom: 12),
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                padding: const EdgeInsets.only(top: 12, left: 16, right: 50, bottom: 12),
+                child:  SingleChildScrollView(
+                   child: Column(
+                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(favorite.translatedText,
-                          style: const TextStyle(fontSize: 16)),
+                         style: const TextStyle(fontSize: 16)),
                       const SizedBox(height: 8),
-                      Text(
-                        favorite.originalText,
-                        style:
-                            const TextStyle(fontSize: 14, color: Colors.grey),
-                      ),
+                      Text(favorite.originalText,
+                        style: const TextStyle(fontSize: 14, color: Colors.grey),),
                     ],
                   ),
                 ),
