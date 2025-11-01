@@ -54,9 +54,9 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
   final String apiKey =
       'AIzaSyBzXii5o0s_xAUHz8CfLqAgQACaNCYVsjg'; // Replace with your actual Gemini API key
     late GenerativeModel _model;
-  String _selectedLanguage = 'English';
+    String _selectedLanguage = 'English';
     String _selectedDestinationLanguage = 'English';
-
+    String _expalinLanguage ='English';
 
   @override
   void initState() {
@@ -108,9 +108,16 @@ class _TranslatorHomePageState extends State<TranslatorHomePage>
     });
 
      try {
-      final prompt =
-          'Define, Translate, grammer, examples of all scenarios can be used the following text from $_selectedLanguage to $_selectedDestinationLanguage: ${_textController.text}';
-      final content = Content.text(prompt);
+      
+    
+
+      var promptEng ="Define, Translate, grammer, examples of all scenarios can be used the following text from $_selectedLanguage to $_selectedDestinationLanguage: ${_textController.text}; PLease ansswer in this language ${_expalinLanguage}";
+     
+          
+     
+          final content = Content.text(promptEng);
+     
+      
 
       final generateResponse = await _model.generateContent([content]);
     
@@ -203,9 +210,10 @@ Widget _buildTranslateTab() {
                           onTap: () {
                             Clipboard.setData(ClipboardData(
                                 text: _translatedText!.translatedText));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Copied to Clipboard!')),
-                             );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Copied to Clipboard!')),
+                            );
                           },
                           child: SingleChildScrollView(
                             child: Column(
@@ -262,6 +270,35 @@ Widget _buildTranslateTab() {
           }).toList(),
         ),
         SizedBox(height: 16.0),
+
+        // --- ADDED THIS SECTION ---
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Explain in: '),
+            SizedBox(width: 8),
+            DropdownButton<String>(
+              value: _expalinLanguage,
+              items: <String>['English', 'Arabic', 'Swedish']
+                  .map((String value) {
+                return DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(value),
+                );
+              }).toList(),
+              onChanged: (String? newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _expalinLanguage = newValue;
+                  });
+                }
+              },
+            ),
+          ],
+        ),
+        SizedBox(height: 16.0),
+        // --- END OF ADDED SECTION ---
+
         Row(
           children: [
             DropdownButton<String>(
